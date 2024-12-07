@@ -43,22 +43,31 @@ def get_neighbors(obj, results_set=None):
         base_sql, base_params = compiler.as_sql(with_col_aliases=True)
 
     query = """
-        SELECT * FROM
-            (SELECT "col1" as id,
-                    ROW_NUMBER() OVER(),
-                    LAG("col1", 1) OVER() AS prev,
-                    LEAD("col1", 1) OVER() AS next
-                FROM (%s) as ID_AND_ROW)
-        AS SELECTED_ID_AND_ROW
-        """ % (base_sql)
-    query += " WHERE id=%s;"
-    params = list(base_params) + [obj.id]
+        WITH ID_AND_ROW AS (
+            {base_sql}
+        )
+        SELECT *
+        FROM (
+            SELECT 
+                "col1" AS id,
+                ROW_NUMBER() OVER() AS row_num,
+                LAG("col1", 1) OVER() AS prev,
+                LEAD("col1", 1) OVER() AS next
+            FROM ID_AND_ROW
+        ) AS SELECTED_ID_AND_ROW
+        WHERE id = %s;
+    """
 
-    cursor = connection.cursor()
-    cursor.execute(query, params)
-    row = cursor.fetchone()
-    if row is None:
-        return Neighbor(None, None)
+    query = query.format(base_sql=base_sql)  # Embed trusted base_sql into the query
+    
+    params = list(base_params) + [obj.id]
+    
+    # Use cursor as a context manager to ensure it is closed properly
+    with connection.cursor() as cursor:
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        if row is None:
+            return Neighbor(None, None)
 
     left_object_id = row[2]
     right_object_id = row[3]
